@@ -1,0 +1,425 @@
+---
+title: "Hechos estilizados"
+author: "Luis Daniel Hernández Covarrubias"
+format: html
+editor: visual
+---
+
+**Selección de activos**
+Para esta practica seleccioné tres activos diferentes, Microsoft, Apple y Amazon, de los cuales se descargará la información historica desde el 2015 para tener una cantidad n de datos lo suficientemente grande para considerar la muestra como significativa y el analisis tenga peso.
+
+Los hechos estilizados que se comprobaran son los siguientes:
+
+Hecho I (Dependencia lineal debil):Lo que prueba este hecho que es los rendimientos de los activos muesta una autocorrelación muy debil, indicando que los rendimiento futuros deppenden muy poco de los pasados.
+
+Hecho II (Volatility Clustering): Este hecho lo que desmuestra es que la volatilidad del periodo si suele estar relacionada con su volatilidad pasada ya que se muestra que suelen haber periodos de volatilidad similar, cuando viene de ser pequeña suele mantenerse pequeña y cuando empieza a incrementar suele haber un periodo donde se mantiene alta.
+
+Hecho III (Heavy tails): Aqui se demuestra que la distribución de los rendimientos es similar a la normal pero suele mostrar colas pesadas, osea que la probabildiad de rendimientos extremos es mayor que en una distribución normal
+
+Hecho IV (Asymmetry): Este hecho muestra que la distribución de los rendimientos no esta totalmente centrada en 0 e igual de ambos lados.
+
+**ANALISIS DE MSFT**
+
+Obtener datos
+```{r}
+library(quantmod)
+library(moments)
+
+ticker <- "MSFT"
+
+getSymbols(
+  ticker,
+  src="yahoo",
+  from="2015-01-01"
+)
+
+price <- Ad(get(ticker))
+head(price)
+```
+Graficar
+```{r}
+plot(
+  price,
+  main=paste(ticker,"-adjusted price"),
+  ylab="Price",
+  xlab=""
+)
+```
+Rendimiento simple y logaritmico
+```{r}
+simple_return <- dailyReturn(na.omit(price),type="arithmetic")
+log_return <- dailyReturn(na.omit(price),type="log")
+
+head(cbind(simple_return,log_return))
+
+```
+
+```{r}
+plot(
+  log_return,
+  main=paste(ticker,"-Daily Log Returns"),
+  ylab="Log return",
+  xlab=""
+)
+
+abline(h=0,lty=2)
+```
+Hecho I:Dependencia lineal de los rendimientos
+
+Si el rendimiento fue alto ¿eso parece decirnos mucho sobre el rendimiento de hoy?
+
+```{r}
+acf(
+  na.omit(log_return),
+  main="ACF of Log Returns"
+)
+```
+En esta grafica se observa que son muy pequeñas las barras conforme avanzan los lags, por lo que a lo largo del tiempo no se muestra una correlación significativa entre los rendimientos.
+
+Hecho II: Cluster de volatilidad
+```{r}
+acf(
+  na.omit(log_return)^2,
+  main="ACF of Squared Returns"
+)
+```
+En esta grafica se observa que más grandes las barras por lo cual podemos decir que la volatilidad de los rendimientos si tiene una mayor autocorrelación.
+
+
+Hecho III: Colas pesadas
+```{r}
+r <- as.numeric(na.omit(log_return))
+
+hist(
+  r,
+  breaks=50,
+  probability=TRUE,
+  main=paste(ticker,"-Distribucion of Log Returns"),
+  xlab="Log Return"
+)
+
+lines(
+  density(r),
+  lwd=2
+)
+
+mu_hat <- mean(r)
+sigma_hat <- sd(r)
+
+curve(
+  dnorm(x,mean=mu_hat,sd=sigma_hat),
+  add=TRUE,
+  lwd=2,
+  lty=2
+)
+
+legend(
+  "topright",
+  legend=c("Empirical density" ,"Normal benchmark"),
+  lty=c(1,2),
+  lwd =c(2,2),
+  bty="n"
+)
+```
+En la grafica se observa que la distribución de nuestro activo tiene una campana más "picuda" y que las colas son más largas, confirmando el hecho III.
+
+Hecho IV Asimetria
+```{r}
+mean_return <- mean(r)
+sd_return <- sd(r)
+skew_return <- skewness(r)
+kurt_return <- kurtosis(r)
+
+excess_kurtosis <- kurt_return-3
+
+summary_stats <- data.frame(
+  Mean=mean_return,
+  SD=sd_return,
+  Skewness=skew_return,
+  Kurtosis=kurt_return,
+  Excess_Kurtosis=excess_kurtosis
+)
+
+summary_stats
+```
+En base a esta tabla podemos concluir que si tiene un exceso de curtosis significativo y que tiene un asimetria positiva por lo cual esta cargada a la derecha.
+
+
+**ANALISIS DE AAPL**
+
+Obtener datos
+```{r}
+library(quantmod)
+library(moments)
+
+ticker_L <- "AAPL"
+
+getSymbols(
+  ticker_L,
+  src="yahoo",
+  from="2015-01-01"
+)
+
+price_L <- Ad(get(ticker_L))
+head(price_L)
+```
+Graficar
+```{r}
+plot(
+  price_L,
+  main=paste(ticker_L,"-adjusted price"),
+  ylab="Price",
+  xlab=""
+)
+```
+Rendimiento simple y logaritmico
+```{r}
+simple_return_L <- dailyReturn(na.omit(price_L),type="arithmetic")
+log_return_L <- dailyReturn(na.omit(price_L),type="log")
+
+head(cbind(simple_return_L,log_return_L))
+
+```
+
+```{r}
+plot(
+  log_return_L,
+  main=paste(ticker_L,"-Daily Log Returns"),
+  ylab="Log return",
+  xlab=""
+)
+
+abline(h=0,lty=2)
+```
+Hecho I:Dependencia lineal de los rendimientos
+
+Si el rendimiento fue alto ¿eso parece decirnos mucho sobre el rendimiento de hoy?
+
+```{r}
+acf(
+  na.omit(log_return_L),
+  main="ACF of Log Returns"
+)
+```
+En esta grafica se observa que son muy pequeñas las barras conforme avanzan los lags, por lo que a lo largo del tiempo no se muestra una correlación significativa entre los rendimientos.
+
+
+Hecho II: Cluster de volatilidad
+```{r}
+acf(
+  na.omit(log_return_L)^2,
+  main="ACF of Squared Returns"
+)
+```
+En esta grafica se observa que más grandes las barras por lo cual podemos decir que la volatilidad de los rendimientos si tiene una mayor autocorrelación.
+
+
+Hecho III: Colas pesadas
+```{r}
+r_L <- as.numeric(na.omit(log_return_L))
+
+hist(
+  r_L,
+  breaks=50,
+  probability=TRUE,
+  main=paste(ticker_L,"-Distribucion of Log Returns"),
+  xlab="Log Return"
+)
+
+lines(
+  density(r_L),
+  lwd=2
+)
+
+mu_hat_L <- mean(r_L)
+sigma_hat_L <- sd(r)
+
+curve(
+  dnorm(x,mean=mu_hat_L,sd=sigma_hat_L),
+  add=TRUE,
+  lwd=2,
+  lty=2
+)
+
+legend(
+  "topright",
+  legend=c("Empirical density" ,"Normal benchmark"),
+  lty=c(1,2),
+  lwd =c(2,2),
+  bty="n"
+)
+```
+En la grafica se observa que la distribución de nuestro activo tiene una campana más "picuda" y que las colas son más largas, confirmando el hecho III.
+
+
+Hecho IV Asimetria
+```{r}
+mean_return_L <- mean(r_L)
+sd_return_L <- sd(r_L)
+skew_return_L <- skewness(r_L)
+kurt_return_L <- kurtosis(r_L)
+
+excess_kurtosis_L <- kurt_return_L -3
+
+summary_stats_L <- data.frame(
+  Mean=mean_return_L,
+  SD=sd_return_L,
+  Skewness=skew_return_L,
+  Kurtosis=kurt_return_L,
+  Excess_Kurtosis=excess_kurtosis_L
+)
+
+summary_stats_L
+```
+En base a esta tabla podemos concluir que si tiene un exceso de curtosis significativo y que tiene un asimetria negativa por lo cual esta cargada a la izquierda.
+
+
+**ANALISIS DE AMZN**
+
+Obtener datos
+```{r}
+library(quantmod)
+library(moments)
+
+ticker_A <- "AMZN"
+
+getSymbols(
+  ticker_A,
+  src="yahoo",
+  from="2015-01-01"
+)
+
+price_A <- Ad(get(ticker_A))
+head(price_A)
+```
+Graficar
+```{r}
+plot(
+  price_A,
+  main=paste(ticker_A,"-adjusted price"),
+  ylab="Price",
+  xlab=""
+)
+```
+Rendimiento simple y logaritmico
+```{r}
+simple_return_A <- dailyReturn(na.omit(price_A),type="arithmetic")
+log_return_A <- dailyReturn(na.omit(price_A),type="log")
+
+head(cbind(simple_return_A,log_return_A))
+
+```
+
+```{r}
+plot(
+  log_return_A,
+  main=paste(ticker_A,"-Daily Log Returns"),
+  ylab="Log return",
+  xlab=""
+)
+
+abline(h=0,lty=2)
+```
+Hecho I:Dependencia lineal de los rendimientos
+
+Si el rendimiento fue alto ¿eso parece decirnos mucho sobre el rendimiento de hoy?
+
+```{r}
+acf(
+  na.omit(log_return_A),
+  main="ACF of Log Returns"
+)
+```
+En esta grafica se observa que son muy pequeñas las barras conforme avanzan los lags, por lo que a lo largo del tiempo no se muestra una correlación significativa entre los rendimientos.
+
+
+Hecho II: Cluster de volatilidad
+```{r}
+acf(
+  na.omit(log_return_A)^2,
+  main="ACF of Squared Returns"
+)
+```
+En esta grafica se observa que más grandes las barras por lo cual podemos decir que la volatilidad de los rendimientos si tiene una mayor autocorrelación.
+
+
+Hecho III: Colas pesadas
+```{r}
+r_A <- as.numeric(na.omit(log_return_A))
+
+hist(
+  r_A,
+  breaks=50,
+  probability=TRUE,
+  main=paste(ticker_A,"-Distribucion of Log Returns"),
+  xlab="Log Return"
+)
+
+lines(
+  density(r_A),
+  lwd_A=2
+)
+
+mu_hat_A <- mean(r_A)
+sigma_hat_A <- sd(r_A)
+
+curve(
+  dnorm(x,mean=mu_hat_A,sd=sigma_hat_A),
+  add=TRUE,
+  lwd_A=2,
+  lty_A=2
+)
+
+legend(
+  "topright",
+  legend=c("Empirical density" ,"Normal benchmark"),
+  lty=c(1,2),
+  lwd =c(2,2),
+  bty="n"
+)
+```
+En la grafica se observa que la distribución de nuestro activo tiene una campana más "picuda" y que las colas son más largas, confirmando el hecho III.
+
+
+Hecho IV Asimetria
+```{r}
+mean_return_A <- mean(r_A)
+sd_return_A <- sd(r_A)
+skew_return_A <- skewness(r_A)
+kurt_return_A <- kurtosis(r_A)
+
+excess_kurtosis_A <- kurt_return_A-3
+
+summary_stats_A <- data.frame(
+  Mean=mean_return_A,
+  SD=sd_return_A,
+  Skewness=skew_return_A,
+  Kurtosis=kurt_return_A,
+  Excess_Kurtosis=excess_kurtosis_A
+)
+
+summary_stats_A
+```
+En base a esta tabla podemos concluir que si tiene un exceso de curtosis significativo y que tiene un asimetria positiva por lo cual esta cargada a la derecha.
+
+
+**Auditoria con IA**
+Revisé el HTML completo (los tres análisis: MSFT, AAPL, AMZN). En general el enfoque metodológico es razonable —usas precios ajustados, calculas rendimientos logarítmicos, y contrastas ACF de niveles vs. cuadrados para autocorrelación y clustering—, pero hay varios puntos que debilitan tanto la metodología como la interpretación.
+
+El problema más serio está en el Hecho IV para AAPL. Tu tabla muestra Skewness = -0.1194304 (negativa), pero el párrafo de conclusión dice literalmente lo mismo que en MSFT: "tiene una asimetria positiva por lo cual esta cargada a la derecha". Eso es un error de interpretación directo, no solo de redacción: un skewness negativo indica sesgo hacia la izquierda (cola más larga a la izquierda, mean < median), justo lo contrario de lo que escribiste. Todo parece indicar que copiaste el párrafo de MSFT y lo pegaste sin ajustarlo al signo real de AAPL. Vale la pena revisar si esto se repitió en algún otro lugar del documento.
+
+Relacionado con esto: en los tres activos el skewness es muy pequeño en magnitud (0.035 en MSFT, -0.119 en AAPL, 0.260 en AMZN). Estás tratando estos valores como si fueran evidencia contundente de asimetría, pero nunca corres una prueba de significancia (por ejemplo un test de normalidad tipo Jarque-Bera, que de hecho combina skewness y kurtosis en un solo estadístico). Sin eso, no puedes distinguir un skewness "real" de ruido muestral, sobre todo con una magnitud tan cercana a cero como la de MSFT y AAPL. Lo mismo aplica al exceso de curtosis: reportas los números pero nunca pruebas si son estadísticamente distintos de cero.
+
+En el Hecho I, tu argumento de "las barras del ACF son pequeñas" es una lectura visual sin respaldo formal. El gráfico de acf() en R sí dibuja las bandas de confianza (las líneas punteadas azules), así que lo mínimo sería mencionar explícitamente si las barras caen dentro o fuera de esas bandas, o mejor aún, correr un Box.test(log_return, type="Ljung-Box") para tener un p-value. Además, hay una tensión conceptual entre cómo describes el Hecho I y el Hecho II: en la introducción escribes que "los rendimientos futuros dependen muy poco de los pasados", una afirmación general, cuando en realidad lo único que muestra el ACF de niveles es ausencia de dependencia lineal. El Hecho II (clustering en los cuadrados) demuestra precisamente que sí hay dependencia, solo que no lineal. Convendría aclarar esa distinción para no dar la impresión de que ambos hechos se contradicen.
+
+El Hecho II en sí está bien planteado (comparar ACF de retornos vs. retornos al cuadrado es el enfoque estándar), pero de nuevo se queda en lo cualitativo. Un ARCH-LM test o un Ljung-Box sobre los cuadrados le daría peso estadístico a la conclusión.
+
+Para el Hecho III, el histograma con la curva normal superpuesta es una forma válida y común de ilustrar colas pesadas, pero es redundante con el Hecho IV: ahí mismo calculas la curtosis, que es la medida cuantitativa de exactamente lo que el histograma muestra visualmente. Podrías fusionar ambos hechos o al menos referenciar la curtosis calculada más adelante como el respaldo numérico de lo que "se ve" en el histograma.
+
+Un tema metodológico de fondo que no se aborda en ningún punto: tu muestra va de 2015 a 2026, un periodo con al menos dos eventos extremos (el crash de COVID en 2020 y el mercado bajista de 2022 por alzas de tasas). El exceso de curtosis tan alto que reportas (8.8 en MSFT, 6.2 en AAPL, 6.0 en AMZN) puede estar dominado por un puñado de días extremos de esos periodos, más que reflejar un patrón "estilizado" persistente en toda la serie. Vale la pena al menos mencionar esto como limitación, o idealmente correr el análisis por subperiodos (pre/post-COVID) para ver si las colas pesadas y el clustering se mantienen o si son artefacto de esos shocks puntuales. Decir que "n es grande, por lo tanto la muestra es significativa" no resuelve este problema, porque el supuesto de que los rendimientos son i.i.d. a lo largo de todo el periodo es justamente lo que Hechos II y III están cuestionando.
+
+Por último, un detalle de código (no invalida resultados pero vale la pena corregir): en el chunk de AMZN usaste `lwd_A=2` dentro de `lines()` y `lwd_A=2, lty_A=2` dentro de `curve()`, en vez de `lwd`/`lty`. R marca advertencia ("es un parámetro gráfico inválido") y simplemente ignora esos argumentos, así que la línea de densidad empírica y la curva normal de AMZN se dibujaron con el grosor y tipo de línea por defecto en vez del que pretendías. Es un residuo de haber reemplazado "_L" por "_A" en todo el bloque sin revisar que también afectó nombres de argumentos que no debían cambiar.
+
+En resumen: la estructura del análisis (los cuatro hechos, el tipo de gráficos elegidos) está bien encaminada, pero le falta soporte estadístico formal (pruebas de hipótesis en vez de solo lectura visual), tiene un error de interpretación de signo en el skewness de AAPL que contradice tu propia tabla, y no se discute la sensibilidad de los resultados a los periodos de crisis dentro de la muestra.
+**CONCLUSION**
+Los tres activos se parecen bastante en los Hechos I y II: en los tres las barras del ACF de los rendimientos son chiquitas, o sea que no hay mucha correlación entre lo que pasó ayer y lo que pasa hoy, pero cuando saco el ACF de los rendimientos al cuadrado las barras se ven mucho más grandes en los tres casos, lo que confirma que sí hay cluster de volatilidad en MSFT, AAPL y AMZN por igual. Donde ya empiezan a diferir es en las colas pesadas: los tres tienen exceso de curtosis bastante alto, pero MSFT (8.84) se lleva las colas más pesadas de los tres, mientras que AAPL (6.21) y AMZN (6.02) quedan más parecidos entre sí pero abajo de MSFT. La diferencia más clara está en la asimetría: MSFT prácticamente no tiene skewness (0.035, casi en cero), AAPL sale con skewness negativo (-0.119), y AMZN con positivo (0.260), o sea que ni siquiera coinciden en el signo, cada uno se comporta distinto de este lado. Además AMZN es el que trae la volatilidad más alta de los tres (SD de 0.0208 contra 0.0173 de MSFT y 0.0181 de AAPL), así que es el que más se mueve día a día. Para medir riesgo esto importa bastante: como los tres tienen cluster de volatilidad, no puedo usar una desviación estándar fija para calcular el riesgo, tendría que usar algo como un GARCH que sí capture que la volatilidad cambia con el tiempo. Y como los tres tienen colas pesadas (sobre todo MSFT), si uso un VaR normal estaría subestimando la probabilidad de pérdidas grandes, entonces me convendría usar una distribución t o simulación histórica en vez de asumir normalidad. Lo de la asimetría también pega directo en AAPL, porque al tener skew negativo quiere decir que sus pérdidas extremas pesan más que sus ganancias extremas, cosa que un VaR simétrico no estaría reflejando bien. Y en general, como los tres se parecen en la dependencia (poca autocorrelación, mucho clustering) pero difieren en asimetría y curtosis, si armara un portafolio con los tres no podría simplemente sumar el riesgo de cada uno por separado, tendría que ver cómo se mueven juntos.
