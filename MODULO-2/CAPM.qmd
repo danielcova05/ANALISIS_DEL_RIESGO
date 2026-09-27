@@ -1,0 +1,240 @@
+---
+title: "CAPM"
+author: "Luis Daniel Hernández Covarrubias"
+format: html
+editor: visual
+---
+
+Tomaremos datos para con ellos estimar el modelo CAPM y verificar si el rendimiento del activo es consistente con el rendimiento que el CAPM exige para su nivel de exposición al reisgo.
+
+Ademas de identificar el riesgo sistematico y no sistemático
+
+Para el modelo CAPM, usualmente se utulizan los ultimos 5 años de info y los datos se mensualizan para tener rendimientos mensuales que pueden ser comparables con una tasa representativa del libre de riesgo en el mercado
+
+```{r librerias}
+library(PerformanceAnalytics)
+library(quantmod)
+library(httr)
+library(jsonlite)
+library(xts)
+library(zoo)
+```
+
+```{r}
+tic_activo <- "GFNORTEO.MX"
+tic_mercado <- "^MXX"
+serie_banxico <- "SF43936"
+fecha_inicio <- as.Date("2021-01-01")
+fecha_fin <- as.Date("2026-09-21")
+```
+
+```{r funcion banxico}
+get_banxico_series <- function(
+    series_id,
+    start_date,
+    end_date,
+    token
+) {
+  
+  url <- paste0(
+    "https://www.banxico.org.mx/",
+    "SieAPIRest/service/v1/series/",
+    series_id,
+    "/datos/",
+    format(start_date, "%Y-%m-%d"),
+    "/",
+    format(end_date, "%Y-%m-%d")
+  )
+  
+  response <- GET(
+    url,
+    add_headers(
+      "Bmx-Token" = token
+    )
+  )
+  
+  stop_for_status(response)
+  
+  parsed <- content(
+    response,
+    as = "parsed",
+    type = "application/json",
+    encoding = "UTF-8"
+  )
+  
+  datos <- parsed$bmx$series[[1]]$datos
+  
+  out <- data.frame(
+    date = as.Date(
+      sapply(datos, `[[`, "fecha"),
+      format = "%d/%m/%Y"
+    ),
+    rate_pct = sapply(
+      datos,
+      `[[`,
+      "dato"
+    ),
+    stringsAsFactors = FALSE
+  )
+  
+  out$rate_pct <- as.numeric(
+    gsub(",", "", out$rate_pct)
+  )
+  
+  out <- out[
+    !is.na(out$rate_pct),
+  ]
+  
+  out
+}
+```
+
+```{r descarga}
+getSymbols(c(tic_activo,tic_mercado),from=fecha_inicio)
+activo_diario <- Ad(get(tic_activo))
+mercado_diario <- Ad(get("MXX"))
+banxico_token <- "12bc9fdcd7cf13f6e57bd76a9302b430214acbf351059efd59aa6372851ecc33"
+tasa_diaria <- get_banxico_series(series_id = serie_banxico,
+                                  start_date = fecha_inicio, 
+                                  end_date = fecha_fin , 
+                                  token=banxico_token)
+```
+
+como los datos son mensuales los pondremos en esta temporalidad
+
+```{r ajuste mensual}
+activo_mensual <- apply.monthly(activo_diario,last)
+mercado_mensual <- apply.monthly(mercado_diario, last)
+precios_mensuales <- merge(activo_mensual,mercado_mensual)
+colnames(precios_mensuales) <- c("Activo","Mercado")
+tasa_diaria$rate_pct <- tasa_diaria$rate_pct/100/12
+```
+
+como la tasa esta en dta drame , la voy a poner en serie de tiempo para que sea consistente con las otras tasas, ademas de que debo tener una por mes.
+
+```{r}
+tasa_diaria <- xts(tasa_diaria$rate_pct,
+                   order.by=tasa_diaria$date)
+
+```
+
+```{r}
+colnames(tasa_diaria) <- "TasaLR"
+
+```
+
+```{r}
+tasa_mensual <- apply.monthly(tasa_diaria,last)
+```
+
+Calcular rendimientos de todo
+
+```{r}
+rend_precios <- na.omit(Return.calculate(precios_mensuales,
+                                 method="discrete"))
+rend_tasa <- na.omit(Return.calculate(tasa_mensual,
+                                 method="discrete"))
+
+df_rend_capm <- data.frame(
+  Mes=as.yearmon(index(rend_precios)),
+  Activo=as.numeric(rend_precios$Activo),
+  Mercado=as.numeric(rend_precios$Mercado),
+  TasaLR=as.numeric(rend_tasa$TasaLR)
+)
+```
+
+En el modelo lo que observamos son los rendimientos excedentes tanto del mercado como del activo respecto a la tasa libre de riesgo, entonces debemos calcular ese excedente.
+
+```{r}
+capm_excedentes <- data.frame(Eif=df_rend_capm$Activo-df_rend_capm$TasaLR,
+                              Emf=df_rend_capm$Mercado-df_rend_capm$TasaLR) 
+```
+
+```{r}
+cols <- c("black","blue","green")
+matplot(
+  df_rend_capm[,c("Activo","Mercado","TasaLR")],
+  type="l",
+  col=cols,
+  ylab="Rendimiento",
+  xlab=""
+)
+legend(
+  "topleft",
+  legend = c("Activo","Mercado","Cete"),
+  col=cols,
+  lty=1
+)
+```
+
+Ahora si ya podemos hacer la regresión para encontrar los parametros
+
+```{r}
+modelo_capm <- lm(Eif~Emf,
+                  data=capm_excedentes)
+summary(modelo_capm)
+```
+El coeficiente Beta es de 1.11 lo que significa que tiene una posicion un poco agresiva frente al mercado, ya que en vez de moverse 1 a 1 con el mercado de mueve 1 a 1.11
+
+¿Cual es el riesgo total mensual de este activo?
+
+```{r}
+riesgo_total_mensual <- var(capm_excedentes$Eif)
+riesgo_total_mensual
+```
+
+Riesgo sistemático mensual
+
+```{r}
+beta <- modelo_capm[["coefficients"]][["Emf"]]
+riesgo_sis_mensual <- var(capm_excedentes$Emf)*beta^2
+riesgo_sis_mensual
+```
+Riesgo no sistematico: Es la diferencia entre el riesgo total y el riesgo sistematico
+
+```{r}
+riesgo_total_mensual-riesgo_sis_mensual
+```
+```{r}
+riesgo_nosis_mensual <- var(modelo_capm[["residuals"]])
+```
+
+Obteniendo en terminos de volatilidades mensual
+
+
+```{r}
+sqrt(riesgo_total_mensual)
+sqrt(riesgo_sis_mensual)
+sqrt(riesgo_nosis_mensual)
+```
+ahora en terminos anuales tenemos
+
+```{r}
+sqrt(riesgo_total_mensual)*sqrt(12)
+sqrt(riesgo_sis_mensual)*sqrt(12)
+sqrt(riesgo_nosis_mensual)*sqrt(12)
+```
+
+
+```{r}
+h <- summary(modelo_capm)
+R2 <- h$r.squared
+```
+ 
+Una aproximación al riesgo del sistema es multiplicar el riesgo total por el R2
+
+```{r}
+riesgo_total_mensual*R2
+```
+
+```{r}
+promedio_rend_activo <- mean(df_rend_capm$Activo)
+promedio_rend_mercado <- mean(df_rend_capm$Mercado)
+promedio_rend_tasa <- mean(df_rend_capm$TasaLR)
+promedio_rend_activo
+```
+
+```{r}
+promedio_rend_tasa+beta*(promedio_rend_mercado-promedio_rend_tasa)
+```
+

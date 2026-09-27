@@ -1,0 +1,489 @@
+---
+title: "Tarea 7"
+author: "Luis Daniel Hernández Covarrubias"
+format:
+  html:
+    embed-resources: true
+editor: visual
+---
+## Problema 1 
+```{r datos}
+ 
+library(quantmod)
+
+tic <- "GFNORTEO.MX"
+getSymbols(tic, from = Sys.Date() - (2*365 + 60))  
+precio <- na.omit(Ad(get(tic)))
+
+plot(precio, main = "Precio ajustado - GFNORTEO.MX", ylab = "Precio")
+
+log_precio <- log(precio)
+plot(log_precio, main = "Log-precio - GFNORTEO.MX", ylab = "ln(S_t)")
+```
+Sacando los rendimientos simples y log-rendimientos
+
+```{r rendimientos}
+Rt <- dailyReturn(precio, type = "arithmetic")   
+rt <- dailyReturn(precio, type = "log")         
+```
+
+sacando y anualizadno la media y volatilidad diaria
+
+```{r media y volatilidad}
+r_daily     <- mean(rt)
+sigma_daily <- sd(rt)
+sigma_ann   <- sigma_daily * sqrt(252)
+```
+
+estimando mu
+
+```{r mu}
+mu_hat <- 252*r_daily + 0.5*sigma_ann^2
+```
+
+$252\,\bar r_{daily}$ no debe interpretarse como $\hat\mu$ porque los rendimientos que se promedian son logarítmicos y por el lema de Itô el drift de $\ln S_t$ no es $\mu$ sino $\mu-\tfrac12\sigma^2$ entonces $252\,\bar r_{daily}$ realmente estima $\mu-\tfrac12\sigma^2$, no $\mu$, y para recuperar $\mu$ de verdad tenemos q sumarle de vuelta $\tfrac12\hat\sigma_{ann}^2$ porque si no lo hacemos subestimamos la tasa de crecimiento del activo y ese error va a crecer mientras más volátil sea.
+
+En resumen
+
+```{r}
+tabla_p1 <- data.frame(
+  S0          = as.numeric(tail(precio, 1)),
+  r_daily     = as.numeric(r_daily),
+  sigma_daily = as.numeric(sigma_daily),
+  sigma_ann   = as.numeric(sigma_ann),
+  mu_hat      = as.numeric(mu_hat)
+)
+print(tabla_p1)
+```
+## Problema 2
+
+```{r}
+library(tseries)
+
+# a, b, c) Histogramas
+hist(as.numeric(precio),     main = "Histograma de S_t",    xlab = "Precio")
+hist(as.numeric(log_precio), main = "Histograma de ln S_t", xlab = "ln(Precio)")
+hist(as.numeric(Rt),         main = "Histograma de R_t",    xlab = "Rendimiento simple")
+hist(as.numeric(rt),         main = "Histograma de r_t",    xlab = "Rendimiento log")
+
+# d) Jarque-Bera para cada una
+jb_precio    <- jarque.bera.test(as.numeric(precio))
+jb_logprecio <- jarque.bera.test(as.numeric(log_precio))
+jb_Rt        <- jarque.bera.test(as.numeric(Rt))
+jb_rt        <- jarque.bera.test(as.numeric(rt))
+
+# e) Tabla resumen
+tabla_jb <- data.frame(
+  variable  = c("S_t", "ln S_t", "R_t", "r_t"),
+  statistic = c(jb_precio$statistic, jb_logprecio$statistic, jb_Rt$statistic, jb_rt$statistic),
+  p_value   = c(jb_precio$p.value, jb_logprecio$p.value, jb_Rt$p.value, jb_rt$p.value)
+)
+tabla_jb$decision <- ifelse(tabla_jb$p_value < 0.05, "Rechaza H0 (no normal)", "No rechaza H0")
+print(tabla_jb)
+```
+
+La prueba que esta directamente relacionada con el supuesto del GBM es la de $r_t$ porque el modelo hace una afirmación exacta de su distribución. 
+
+e)
+Como se observa en la tabla las cuatro pruebas de Jarque–Bera rechazan $H_0$ por lo que ninguna de las cuatro variables es consistente con una distribución Normal exacta en la muestra histórica completa, esto se debe a que las observaciones no son independientes y la serie no es estacionaria.
+
+h)
+El rechazo de normalidad en $R_t$ y $r_t$ se debe principalmente a las colas pesadas y a la asimetría. El clustering de volatilidad no lo detecta JB directamente, pero es la causa de las colas pesadas ya que al mezclar periodos de varianza baja y alta en un solo histograma se genera una distribución con más extremos que una Normal.
+
+## Problema 3
+
+```{r}
+T5 <- 5/252
+```
+
+```{r}
+S0 <-  tabla_p1$S0
+```
+
+
+```{r}
+# a) Aproximación local - teórica
+mean_local <- mu_hat*S0*T5
+sd_local   <- sigma_ann*S0*sqrt(T5)
+p_local_teo <- pnorm(0, mean = mean_local, sd = sd_local)
+p_local_teo
+```
+
+
+```{r}
+# b) Aproximación local - empírica (Monte Carlo)
+set.seed(43)
+n_sim <- 100000
+Z <- rnorm(n_sim)
+delta_S_sim <- mu_hat*S0*T5 + sigma_ann*S0*sqrt(T5)*Z
+p_local_emp <- mean(delta_S_sim < 0)
+p_local_emp
+```
+
+```{r}
+# c) Solución exacta - teórica
+mean_ln <- (mu_hat - 0.5*sigma_ann^2)*T5
+sd_ln   <- sigma_ann*sqrt(T5)
+p_exact_teo <- pnorm(0, mean = mean_ln, sd = sd_ln)
+p_exact_teo
+```
+
+```{r}
+# d) Solución exacta - empírica (Monte Carlo, mismos shocks Z)
+ST_sim <- S0*exp((mu_hat - 0.5*sigma_ann^2)*T5 + sigma_ann*sqrt(T5)*Z)
+p_exact_emp <- mean(ST_sim < S0)
+p_exact_emp
+```
+
+```{r}
+# e) Tabla comparativa
+tabla_p3 <- data.frame(
+  metodo = c("Local - teórica", "Local - empírica", "Exacta - teórica", "Exacta - empírica"),
+  probabilidad = c(p_local_teo, p_local_emp, p_exact_teo, p_exact_emp)
+)
+print(tabla_p3)
+```
+
+f)
+A un horizonte muy corto como $T=5/252$, $\sigma\sqrt{T}$ es pequeño, lo que hace que dos cosas casi desaparezcan, la corrección de Itô $-\tfrac12\sigma^2T$ se vuelve insignificante frente al término de drift $\mu T$, así que la media de $\ln(S_T/S_0)$ casi coincide con la media que usa la aproximación local y ademas con $\sigma\sqrt{T}$ chico, la distribución lognormal de $S_T$ todavía no desarrolla su asimetría característica y se comporta casi simétrica, muy parecida a una Normal. Por eso la aproximación normal local reproduce casi exactamente a la solución exacta a corto plazo.
+
+## Problema 4
+
+```{r}
+T1 <- 1
+```
+
+```{r}
+# a) Aproximación local - teórica
+mean_local_1 <- mu_hat*S0*T1
+sd_local_1   <- sigma_ann*S0*sqrt(T1)
+p_local_teo_1 <- pnorm(0, mean = mean_local_1, sd = sd_local_1)
+p_local_teo_1
+```
+
+```{r}
+# b) Aproximación local - empírica
+set.seed(123)
+Z1 <- rnorm(n_sim)
+delta_S_sim_1 <- mu_hat*S0*T1 + sigma_ann*S0*sqrt(T1)*Z1
+p_local_emp_1 <- mean(delta_S_sim_1 < 0)
+p_local_emp_1
+```
+
+```{r}
+# c) Solución exacta - teórica
+mean_ln_1 <- (mu_hat - 0.5*sigma_ann^2)*T1
+sd_ln_1   <- sigma_ann*sqrt(T1)
+p_exact_teo_1 <- pnorm(0, mean = mean_ln_1, sd = sd_ln_1)
+p_exact_teo_1
+```
+
+```{r}
+# d) Solución exacta - empírica (mismos shocks Z1)
+ST_sim_1 <- S0*exp((mu_hat - 0.5*sigma_ann^2)*T1 + sigma_ann*sqrt(T1)*Z1)
+p_exact_emp_1 <- mean(ST_sim_1 < S0)
+p_exact_emp_1
+```
+
+```{r}
+# e) Comparación contra los resultados de 5 días
+tabla_p4 <- data.frame(
+  metodo = c("Local - teórica", "Local - empírica", "Exacta - teórica", "Exacta - empírica"),
+  T_5dias = c(p_local_teo, p_local_emp, p_exact_teo, p_exact_emp),
+  T_1anio = c(p_local_teo_1, p_local_emp_1, p_exact_teo_1, p_exact_emp_1)
+)
+print(tabla_p4)
+```
+
+La que más se deteriora es la aproximación local, porque sigue tratando el crecimiento como lineal aunque ya pasó suficiente tiempo para que la "exponencial agarre vuelo" — ignora que el precio se compone sobre sí mismo y que la distribución real ya se volvió asimétrica (lognormal), cosas que la solución exacta sí captura sin importar qué tan grande sea $T$.
+
+## Problema 5
+
+```{r}
+horizontes <- c(1/252, 10/252, 60/252, 1)
+```
+
+```{r}
+# a) Esperanza y b) Varianza
+E_ST   <- S0*exp(mu_hat*horizontes)
+Var_ST <- S0^2*exp(2*mu_hat*horizontes)*(exp(sigma_ann^2*horizontes)-1)
+
+# c) Mediana
+Median_ST <- S0*exp((mu_hat-0.5*sigma_ann^2)*horizontes)
+```
+
+```{r}
+# d) Intervalo de probabilidad del 95% 
+z_995 <- qnorm(0.975)
+ln_mean <- log(S0) + (mu_hat-0.5*sigma_ann^2)*horizontes
+ln_sd   <- sigma_ann*sqrt(horizontes)
+
+lim_inf <- exp(ln_mean - z_995*ln_sd)
+lim_sup <- exp(ln_mean + z_995*ln_sd)
+```
+
+```{r}
+# e) P(S_T > 1.10*S0)
+umbral <- 1.10*S0
+z_umbral <- (log(umbral) - ln_mean)/ln_sd
+p_mayor_110 <- 1 - pnorm(z_umbral)
+```
+
+
+```{r}
+# f) Tabla resumen
+T_label <- c("1/252", "10/252", "60/252", "1")
+
+tabla_p5 <- data.frame(
+  T = T_label,
+  E_ST = E_ST,
+  Var_ST = Var_ST,
+  Median_ST = Median_ST,
+  Lim_inf_95 = lim_inf,
+  Lim_sup_95 = lim_sup,
+  P_ST_mayor_110 = p_mayor_110
+)
+print(tabla_p5)
+```
+
+f)
+La incertidumbre sobre $S_T$ no crece de forma proporcional al tiempo, crece de forma acelerada y cada vez más asimétrica hacia arriba porque $S_T$ es lognormal y esa asimetría se hace mayor mientras mas crece el horizonte.
+
+## Problema 6
+
+```{r}
+set.seed(42)
+T_p6 <- 1
+Z <- rnorm(n_sim)
+
+ST_sim <- S0*exp((mu_hat - 0.5*sigma_ann^2)*T_p6 + sigma_ann*sqrt(T_p6)*Z)
+```
+
+
+```{r}
+# b) Comparación de la media
+E_hat <- mean(ST_sim)
+E_teo <- S0*exp(mu_hat*T_p6)
+c(E_hat = E_hat, E_teo = E_teo)
+```
+
+```{r}
+# c) Comparación de la varianza
+Var_hat <- var(ST_sim)
+Var_teo <- S0^2*exp(2*mu_hat*T_p6)*(exp(sigma_ann^2*T_p6)-1)
+c(Var_hat = Var_hat, Var_teo = Var_teo)
+```
+
+```{r}
+# d) % de simulaciones dentro del intervalo teórico del 95%
+z_995 <- qnorm(0.975)
+ln_mean_p6 <- log(S0) + (mu_hat - 0.5*sigma_ann^2)*T_p6
+ln_sd_p6   <- sigma_ann*sqrt(T_p6)
+
+lim_inf_p6 <- exp(ln_mean_p6 - z_995*ln_sd_p6)
+lim_sup_p6 <- exp(ln_mean_p6 + z_995*ln_sd_p6)
+
+pct_dentro <- mean(ST_sim > lim_inf_p6 & ST_sim < lim_sup_p6)
+pct_dentro
+```
+e)
+No se espera una coincidencia exacta entre lo simulado y lo teórico porque la simulación usa una muestra finita de 100,000 trayectorias y no la población infinita de todos los posibles caminos que describe el modelo. Por la Ley de los Grandes Números el promedio muestral converge al valor teórico cuando el número de simulaciones crece pero al haber cualquier cantidad finita de simulaciones siempre va a quedar un error de muestreo aleatorio, aunque sea pequeño.
+
+## Problema 7
+
+```{r}
+Y_T <- log(ST_sim)
+r0T <- log(ST_sim/S0)
+```
+
+```{r}
+# a) Distribución simulada de S_T
+hist(ST_sim, main = "Distribución simulada de S_T", xlab = "S_T", breaks = 50)
+jb_ST_sim <- jarque.bera.test(ST_sim)
+jb_ST_sim
+```
+
+```{r}
+# b) Distribución simulada de Y_T = ln(S_T)
+hist(Y_T, main = "Distribución simulada de Y_T = ln(S_T)", xlab = "ln(S_T)", breaks = 50)
+jb_YT <- jarque.bera.test(Y_T)
+jb_YT
+```
+
+```{r}
+# c) Distribución simulada de r(0,T) = ln(S_T/S0)
+hist(r0T, main = "Distribución simulada de r(0,T)", xlab = "ln(S_T/S0)", breaks = 50)
+jb_r0T <- jarque.bera.test(r0T)
+jb_r0T
+```
+
+d)
+Bajo GBM, las variables que deberían ser Normales son $Y_T=\ln S_T$ y $r_{0,T}=\ln(S_T/S_0)$. Ambas se obtienen de $S_0$ (constante) más una combinación lineal de $Z\sim N(0,1)$, y sumar/multiplicar una Normal por constantes no cambia su forma — solo la desplaza o reescala
+
+e)
+La variable que debería ser lognormal es $S_T$ misma, ya que $S_T=e^{Y_T}$ es la exponencial de una variable Normal — por definición, eso es justo una lognormal.
+
+f)
+Al comparar con el Problema 2 la diferencia es que en la simulación $r_{0,T}$ y $\ln S_T$ salen normales porque el modelo GBM se construyó asumiendo exactamente eso ($\mu$ y $\sigma$ constantes, movimientos Normales i.i.d.) y pues se genera por definición lo que asume. Con los datos reales del Problema 2 la prueba JB sí rechazó la normalidad por las colas pesadas, la asimetría y el clustering de volatilidad que existen en el mercado real. Esto confirma que el supuesto de normalidad del GBM es una simplificación útil pero no es perfecta.
+
+## Problema 8
+
+```{r}
+simular_trayectorias <- function(S0, mu, sigma, T, dt, seed=123) {
+  n_steps <- T/dt
+  set.seed(seed)
+  Z <- rnorm(n_steps)
+  
+  S_EM     <- numeric(n_steps+1)   
+  S_exact  <- numeric(n_steps+1)
+  S_EM[1]    <- S0
+  S_exact[1] <- S0
+  
+  for (i in 1:n_steps) {
+    S_EM[i+1]    <- S_EM[i] + mu*S_EM[i]*dt + sigma*S_EM[i]*sqrt(dt)*Z[i]
+    S_exact[i+1] <- S_exact[i]*exp((mu-0.5*sigma^2)*dt + sigma*sqrt(dt)*Z[i])
+  }
+  
+  list(S_EM = S_EM, S_exact = S_exact, tiempos = seq(0, T, by = dt))
+}
+```
+
+```{r}
+# a, b, c) Trayectoria y gráfica con dt = 1/252
+res_252 <- simular_trayectorias(S0, mu_hat, sigma_ann, T = 1, dt = 1/252)
+
+plot(res_252$tiempos, res_252$S_exact, type = "l", col = "blue",
+     main = "Euler-Maruyama vs. Solución exacta (dt = 1/252)",
+     xlab = "Tiempo (años)", ylab = "Precio")
+lines(res_252$tiempos, res_252$S_EM, col = "red")
+legend("topleft", legend = c("Exacta", "Euler-Maruyama"), col = c("blue","red"), lty = 1)
+```
+
+```{r}
+# d) Error absoluto al final del horizonte
+error_252 <- abs(tail(res_252$S_EM, 1) - tail(res_252$S_exact, 1))
+error_252
+```
+
+```{r}
+# e) Repetir con dt = 1/252, 1/52, 1/12
+deltas <- c(1/252, 1/52, 1/12)
+errores <- numeric(length(deltas))
+
+for (j in seq_along(deltas)) {
+  res <- simular_trayectorias(S0, mu_hat, sigma_ann, T = 1, dt = deltas[j])
+  errores[j] <- abs(tail(res$S_EM, 1) - tail(res$S_exact, 1))
+}
+
+tabla_p8 <- data.frame(dt = c("1/252","1/52","1/12"), error_absoluto = errores)
+print(tabla_p8)
+```
+
+```{r}
+n_rep <- 1000
+deltas <- c(1/252, 1/52, 1/12)
+error_promedio <- numeric(length(deltas))
+
+for (j in seq_along(deltas)) {
+  errores_rep <- numeric(n_rep)
+  for (k in 1:n_rep) {
+    res <- simular_trayectorias(S0, mu_hat, sigma_ann, T = 1, dt = deltas[j], seed = k)
+    errores_rep[k] <- abs(tail(res$S_EM, 1) - tail(res$S_exact, 1))
+  }
+  error_promedio[j] <- mean(errores_rep)
+}
+
+tabla_p8_prom <- data.frame(dt = c("1/252","1/52","1/12"), error_promedio = error_promedio)
+print(tabla_p8_prom)
+```
+
+f)
+El error absoluto promedio crece de forma continua mientas $\Delta t$ aumenta: 0.763 con $\Delta t=1/252$, 1.609 con $\Delta t=1/52$, y 3.497 con $\Delta t=1/12$. Esto confirma que entre más grande el paso de tiempo, menos exacta es cada actualización de Euler–Maruyama, y ese error se acumula a lo largo del camino, dejando un error mayor al final del horizonte.
+
+g)
+La solución exacta preserva $S_t>0$ porque construye cada paso como $S_t\times e^{(\cdots)}$, y una exponencial siempre es positiva sin importar qué tan negativo sea el shock $Z$. Euler–Maruyama actualiza de forma aditiva ($S_{t+\Delta t}=S_t+\mu S_t\Delta t+\sigma S_t\sqrt{\Delta t}Z_t$), así que un shock suficientemente negativo puede volver el resultado negativo.
+
+
+## Problema 9
+
+```{r}
+S0_p9 <- 15
+mu_p9 <- 0.15
+sigma_p9 <- 0.65
+umbral_p9 <- 18
+```
+
+```{r}
+# a) Probabilidad teórica para T = 1/12, 0.5, 1
+T_p9 <- c(1/12, 0.5, 1)
+
+ln_mean_p9 <- log(S0_p9) + (mu_p9 - 0.5*sigma_p9^2)*T_p9
+ln_sd_p9   <- sigma_p9*sqrt(T_p9)
+z_p9       <- (log(umbral_p9) - ln_mean_p9)/ln_sd_p9
+p_teo_p9   <- 1 - pnorm(z_p9)
+
+tabla_p9a <- data.frame(T = c("1/12","0.5","1"), p_teorica = p_teo_p9)
+print(tabla_p9a)
+```
+
+```{r}
+# b) Verificación Monte Carlo
+set.seed(123)
+p_emp_p9 <- numeric(length(T_p9))
+
+for (i in seq_along(T_p9)) {
+  Z <- rnorm(n_sim)
+  ST_sim_p9 <- S0_p9*exp((mu_p9-0.5*sigma_p9^2)*T_p9[i] + sigma_p9*sqrt(T_p9[i])*Z)
+  p_emp_p9[i] <- mean(ST_sim_p9 > umbral_p9)
+}
+
+tabla_p9b <- data.frame(T = c("1/12","0.5","1"), p_teorica = p_teo_p9, p_empirica = p_emp_p9)
+print(tabla_p9b)
+```
+
+```{r}
+# c) Generalizar de 1 mes a 20 años, mensual
+T_seq <- seq(1/12, 20, by = 1/12)
+
+ln_mean_seq <- log(S0_p9) + (mu_p9 - 0.5*sigma_p9^2)*T_seq
+ln_sd_seq   <- sigma_p9*sqrt(T_seq)
+z_seq       <- (log(umbral_p9) - ln_mean_seq)/ln_sd_seq
+p_seq       <- 1 - pnorm(z_seq)
+```
+
+```{r}
+# d) Gráfica
+plot(T_seq, p_seq, type = "l",
+     main = "P(S_T > 18) en función del horizonte T",
+     xlab = "T (años)", ylab = "P(S_T > 18)")
+```
+E)
+La gráfica no es monótona creciente. Empieza en 0 cuando $T\to0$, sube conforme crece $T$, alcanza un máximo alrededor de $T\approx3$ años, y después decae de nuevo hacia 0 conforme $T$ aumenta hasta 20 años.
+
+f)
+No, no tiene que crecer siempre. Aquí $\mu-\tfrac12\sigma^2=0.15-0.21125=-0.06125$, o sea que el drift del log-precio es negativo aunque $\mu$ sea positivo, porque la volatilidad es muy alta. Como ese drift negativo se va acumulando con $T$, mientras que la dispersión solo crece con $\sqrt T$ , osea mas despacio cuando $T > 0$, llega un punto donde el drift negativo gana y la trayectoria típica del precio empieza a alejarse del umbral en vez de acercarse y es por eso la probabilidad sube al principio pero después se regresa hacia cero.
+
+
+## Problema 10
+
+(a) Estimar un modelo es un proceso totalmente numérico, osea usar los datos históricos para calcular los valores de los parámetros que mejor ajustan el modelo a esos datos. Validar un modelo es distinto ya que es contrastar si las predicciones y supuestos de ese modelo ya estimado realmente describen la realidad. Puedes estimar un modelo perfectamente bien —encontrar los mejores parámetros posibles y al validarlo descubrir que el modelo no describe bien la realidad.
+
+(b) Lo que parece razonable del GBM para el activo que elegí es que el rendimiento tiene un componente de tendencia más un componente puramente aleatorio y que el precio nunca puede volverse negativo, algo que la construcción exponencial del modelo garantiza y que sí es consistente con cómo se comporta un precio real. También a horizontes cortos las probabilidades teóricas y empíricas del modelo se acercan de forma decente a lo que uno observaría.
+
+(c) El supuesto más alejado de los datos reales es que haya volatilidad constante ya que en la realidad hay clustering de volatilidad lo cual es algo que el GBM no contempla. Tambien está el supuesto de normalidad de los rendimientos, que las pruebas de Jarque–Bera en el Problema 2 rechazaron por las colas pesadas y la asimetría que hay en los datos reales.
+
+(d) Al comparar la aproximación local con la solución exacta aprendí que a corto plazo ambas dan resultados casi idénticos, porque el proceso multiplicativo aun no tiene oportunidad de agarrar fuerza y se comporta casi como uno lineal. Pero a horizontes largos son bastante distintos, porque la aproximación local ignora la parte compuesta del precio y la asimetría creciente de la distribución lognormal. Por eso la solución exacta es preferible para horizontes largos, mientras que la aproximación local es suficiente para entender el comportamiento en horizontes muy cortos.
+
+(e) Un modelo puede ser útil aunque sus supuestos no describan perfectamente la realidad porque su objetivo no es replicar la realidad con exactitud sino capturar los mecanismos más importantes con la menor complejidad posible, de forma que se puedan hacer cálculos, tomar decisiones y entender relaciones de una manera manejable. 
+
+(f)
+
+Datos: se recopilan precios históricos reales del activo para tener información sobre su comportamiento pasado.
+
+Parámetros: se estiman $\hat\mu$ y $\hat\sigma$ a partir de esos datos, resumiendo el comportamiento histórico en dos números.
+
+Modelo: se plantea el GBM como una descripción matemática de cómo evolucionará el precio a futuro, a partir de esos parámetros.
+
+Simulación: se generan trayectorias y valores futuros posibles del precio usando el modelo, para explorar el rango de resultados.
+
+Evaluación: se contrastan las predicciones del modelo —probabilidades, distribuciones, momentos— contra la realidad y contra sí mismas (teoría vs. Monte Carlo), para juzgar qué tan confiable es el modelo y en dónde falla.
