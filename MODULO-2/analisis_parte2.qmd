@@ -1,0 +1,278 @@
+---
+title: "Orbia Advance Corporation (ORBIA.MX) — Parte 2"
+subtitle: "Análisis de los cambios en el precio y sus causas"
+author: "Equipo — MAF1005B, Análisis de Riesgo, ITESO"
+format:
+  html:
+    toc: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+
+## Librerías
+
+Corre este chunk primero. Si te falta algún paquete, instálalo una sola vez con `install.packages("nombre")` (por ejemplo `install.packages("patchwork")`) y vuelve a correr el chunk.
+
+```{r libs}
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(patchwork)
+library(tibble)
+```
+
+## 1. Datos
+
+
+
+```{r descarga-opcional}
+#| eval: false
+library(quantmod)
+getSymbols("ORBIA.MX", src = "yahoo", from = "1990-01-01", to = "2026-07-01")
+write.csv(data.frame(Date = index(ORBIA.MX), coredata(ORBIA.MX)),
+          "orbia_precios.csv", row.names = FALSE)
+```
+
+```{r carga-datos}
+precios <- read.csv("orbia_precios.csv", stringsAsFactors = FALSE)
+
+# El CSV de quantmod trae columnas ORBIA.MX.Open/High/Low/Close/Volume/Adjusted;
+# las renombramos a algo simple.
+names(precios) <- c("Date", "Open", "High", "Low", "Close", "Volume", "Adj")
+
+df <- precios %>%
+  mutate(Date = as.Date(Date)) %>%
+  filter(!is.na(Adj), Date <= as.Date("2026-06-30")) %>%
+  arrange(Date) %>%
+  mutate(
+    r  = c(NA, diff(log(Adj))),            # rendimiento log (el que se usa en el texto)
+    sr = c(NA, diff(Adj) / head(Adj, -1))  # rendimiento simple, para movimientos de un día
+  )
+
+cat("Rango de datos:", format(min(df$Date)), "a", format(max(df$Date)),
+    "|", nrow(df), "observaciones\n")
+cat("Días con volumen cero:", sum(df$Volume == 0),
+    sprintf("(%.0f%%)\n", 100 * mean(df$Volume == 0)))
+```
+
+## 2. Estadísticos descriptivos de los rendimientos diarios
+
+Comparamos toda la serie (2000-2026) contra 2006-2026, sin el tramo de baja liquidez (ver justificación en el README).
+
+```{r stats}
+skewness <- function(x) {
+  x <- x[!is.na(x)]; m <- mean(x); s <- sd(x)
+  mean((x - m)^3) / s^3
+}
+exc_kurtosis <- function(x) {
+  x <- x[!is.na(x)]; m <- mean(x); s <- sd(x)
+  mean((x - m)^4) / s^4 - 3
+}
+
+stats_periodo <- function(r) {
+  r <- r[!is.na(r)]
+  c(
+    media_diaria   = mean(r),
+    vol_anualizada = sd(r) * sqrt(252),
+    asimetria      = skewness(r),
+    curtosis_exc   = exc_kurtosis(r),
+    minimo         = min(r),
+    maximo         = max(r)
+  )
+}
+
+tabla_stats <- rbind(
+  `2000-2026` = stats_periodo(df$r),
+  `2006-2026` = stats_periodo(df$r[df$Date >= as.Date("2006-01-01")])
+)
+round(tabla_stats * 100, 2)  # en porcentaje, como en el README
+```
+
+Volatilidad anualizada por año (para ver los picos de 2008, 2020 y 2025):
+
+```{r vol-anual}
+vol_por_anio <- df %>%
+  filter(!is.na(r)) %>%
+  mutate(anio = format(Date, "%Y")) %>%
+  group_by(anio) %>%
+  summarise(vol_anualizada = sd(r) * sqrt(252), .groups = "drop")
+vol_por_anio
+```
+
+## 3. Máximo drawdown
+
+```{r mdd}
+mdd <- function(precio, fecha) {
+  pico_acum <- cummax(precio)
+  dd <- precio / pico_acum - 1
+  i_valle <- which.min(dd)
+  i_pico  <- which.max(precio[1:i_valle])
+  list(
+    mdd_pct     = dd[i_valle] * 100,
+    fecha_pico  = fecha[i_pico],  precio_pico  = precio[i_pico],
+    fecha_valle = fecha[i_valle], precio_valle = precio[i_valle],
+    dd_serie = dd
+  )
+}
+
+res_mdd_adj   <- mdd(df$Adj, df$Date)     # el que se reporta en el texto: -79.5%
+res_mdd_close <- mdd(df$Close, df$Date)   # sin ajustar por dividendos: -84.1%
+
+cat(sprintf("MDD (ajustado):    %.1f%%  (%s $%.2f -> %s $%.2f)\n",
+            res_mdd_adj$mdd_pct, res_mdd_adj$fecha_pico, res_mdd_adj$precio_pico,
+            res_mdd_adj$fecha_valle, res_mdd_adj$precio_valle))
+cat(sprintf("MDD (sin ajustar):  %.1f%%  (%s $%.2f -> %s $%.2f)\n",
+            res_mdd_close$mdd_pct, res_mdd_close$fecha_pico, res_mdd_close$precio_pico,
+            res_mdd_close$fecha_valle, res_mdd_close$precio_valle))
+
+df$dd_pct <- res_mdd_adj$dd_serie * 100  # se usa en la Figura 2
+```
+
+## 4. Los nueve periodos relevantes
+
+Fechas fijadas con el filtro de pivotes (reversión mínima de 40% sobre el precio ajustado; ver README).
+
+```{r periodos}
+periodos <- tribble(
+  ~num, ~inicio,        ~fin,
+  1,    "2008-05-29",   "2009-03-09",
+  2,    "2009-03-09",   "2013-01-04",
+  3,    "2013-01-04",   "2016-02-08",
+  4,    "2016-02-08",   "2018-08-07",
+  5,    "2018-08-07",   "2019-08-14",
+  6,    "2020-01-13",   "2020-04-15",
+  7,    "2020-04-15",   "2021-09-02",
+  8,    "2021-09-02",   "2025-06-23",
+  9,    "2025-06-23",   "2026-05-12"
+) %>%
+  mutate(inicio = as.Date(inicio), fin = as.Date(fin))
+
+precio_en <- function(fecha) {
+  # último precio disponible en o antes de esa fecha (equivalente a pandas asof)
+  df$Adj[max(which(df$Date <= fecha))]
+}
+
+vol_periodo <- function(a, b) {
+  r <- df$r[df$Date > a & df$Date <= b]
+  sd(r, na.rm = TRUE) * sqrt(252)
+}
+
+tabla_periodos <- periodos %>%
+  rowwise() %>%
+  mutate(
+    precio_inicio  = precio_en(inicio),
+    precio_fin     = precio_en(fin),
+    variacion_pct  = (precio_fin / precio_inicio - 1) * 100,
+    duracion_meses = round(as.numeric(fin - inicio) / 30.44, 1),
+    vol_anualizada = vol_periodo(inicio, fin) * 100
+  ) %>%
+  ungroup()
+
+tabla_periodos %>%
+  mutate(across(c(precio_inicio, precio_fin, variacion_pct, vol_anualizada), \(x) round(x, 1)))
+```
+
+## 5. Figura 1 — Precio (escala log) y rendimientos diarios
+
+```{r fig1, fig.width=13, fig.height=8}
+INK <- "#0b0b0b"; INK2 <- "#52514e"; INK3 <- "#8a8983"
+BLUE <- "#2a78d6"; GRID <- "#e6e5e0"; BAND <- "#8a8983"
+
+tema_base <- theme_minimal(base_size = 10) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_line(color = GRID, linewidth = 0.4),
+    axis.text = element_text(color = INK2),
+    axis.title = element_text(color = INK2),
+    axis.ticks = element_blank(),
+    plot.title = element_text(color = INK, face = "bold", size = 13),
+    plot.subtitle = element_text(color = INK2, size = 9),
+    plot.caption = element_text(color = INK3, size = 8, hjust = 0)
+  )
+
+p1_precio <- ggplot(df, aes(Date, Adj)) +
+  geom_line(color = BLUE, linewidth = 0.6) +
+  scale_y_log10(
+    breaks = c(0.5, 1, 2, 5, 10, 20, 50),
+    labels = dollar_format(prefix = "$"),
+    limits = c(0.3, 90)
+  ) +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+  labs(y = "Precio de cierre ajustado (MXN, escala log)", x = NULL) +
+  tema_base
+
+p1_rend <- ggplot(df, aes(Date, r * 100)) +
+  annotate("rect", xmin = min(df$Date), xmax = as.Date("2005-12-31"),
+           ymin = -Inf, ymax = Inf, fill = BAND, alpha = 0.14) +
+  geom_line(color = BLUE, linewidth = 0.25) +
+  geom_hline(yintercept = 0, color = INK3, linewidth = 0.4) +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+  labs(y = "Rendimiento diario (%, log)", x = NULL) +
+  tema_base
+
+fig1 <- p1_precio / p1_rend +
+  plot_layout(heights = c(3, 2)) +
+  plot_annotation(
+    title = "ORBIA.MX: precio y rendimientos diarios, ene-2000 a jun-2026",
+    subtitle = "Cierre ajustado por dividendos. La serie de Yahoo Finance inicia en 2000; el máximo histórico fue en enero de 2013.",
+    caption = "Fuente: elaboración propia con datos de Yahoo Finance (s. f.)."
+  )
+
+fig1
+ggsave("figuras/fig1_precio_rendimientos_R.png", fig1, width = 13, height = 8, dpi = 200, bg = "white")
+```
+
+## 6. Figura 2 — Periodos relevantes y máximo drawdown
+
+```{r fig2, fig.width=13, fig.height=8}
+bandas <- tabla_periodos %>%
+  mutate(centro = inicio + (fin - inicio) / 2)
+
+p2_precio <- ggplot() +
+  lapply(seq_len(nrow(bandas)), function(i) {
+    annotate("rect", xmin = bandas$inicio[i], xmax = bandas$fin[i],
+             ymin = -Inf, ymax = Inf, fill = BAND,
+             alpha = ifelse(bandas$num[i] %% 2 == 0, 0.18, 0.10))
+  }) +
+  geom_line(data = df, aes(Date, Adj), color = BLUE, linewidth = 0.6) +
+  geom_point(data = data.frame(Date = c(res_mdd_adj$fecha_pico, res_mdd_adj$fecha_valle),
+                                Adj  = c(res_mdd_adj$precio_pico, res_mdd_adj$precio_valle)),
+             aes(Date, Adj), size = 2.2, color = INK) +
+  geom_text(data = bandas, aes(centro, 60, label = num), fontface = "bold", size = 3.2, color = INK) +
+  scale_y_log10(breaks = c(0.5, 1, 2, 5, 10, 20, 50), labels = dollar_format(prefix = "$"),
+                limits = c(0.3, 90)) +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+  labs(y = "Precio de cierre ajustado (MXN, escala log)", x = NULL) +
+  tema_base
+
+p2_dd <- ggplot(df, aes(Date, dd_pct)) +
+  lapply(seq_len(nrow(bandas)), function(i) {
+    annotate("rect", xmin = bandas$inicio[i], xmax = bandas$fin[i],
+             ymin = -Inf, ymax = Inf, fill = BAND,
+             alpha = ifelse(bandas$num[i] %% 2 == 0, 0.18, 0.10))
+  }) +
+  geom_area(fill = BLUE, alpha = 0.25) +
+  geom_line(color = BLUE, linewidth = 0.5) +
+  geom_point(data = data.frame(Date = res_mdd_adj$fecha_valle, dd_pct = res_mdd_adj$mdd_pct),
+             aes(Date, dd_pct), size = 2.2, color = INK) +
+  scale_y_continuous(labels = \(x) paste0(x, "%"), limits = c(-100, 5)) +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+  labs(y = "Caída desde el máximo previo (%)", x = NULL) +
+  tema_base
+
+fig2 <- p2_precio / p2_dd +
+  plot_layout(heights = c(3, 2)) +
+  plot_annotation(
+    title = "ORBIA.MX: periodos relevantes y máximo drawdown",
+    subtitle = sprintf("Máximo drawdown: %.1f%% (%s a %s). Las bandas numeradas marcan los nueve periodos analizados.",
+                        res_mdd_adj$mdd_pct, res_mdd_adj$fecha_pico, res_mdd_adj$fecha_valle),
+    caption = "Fuente: elaboración propia con datos de Yahoo Finance (s. f.)."
+  )
+
+fig2
+ggsave("figuras/fig2_periodos_drawdown_R.png", fig2, width = 13, height = 8, dpi = 200, bg = "white")
+```
